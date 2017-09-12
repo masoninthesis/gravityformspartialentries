@@ -1,16 +1,16 @@
 <?php
 /*
-Plugin Name: Gravity Forms Partial Entries
+Plugin Name: Gravity Forms Partial Entries Add-On
 Plugin URI: http://www.gravityforms.com
 Description: Adds support for partial submissions
-Version: 1.0-beta-1
+Version: 1.0.6
 Author: rocketgenius
 License: GPL-2.0+
 Text Domain: gravityformspartialentries
 Domain Path: /languages/
 
 ------------------------------------------------------------------------
-Copyright 2015 Rocketgenius
+Copyright 2016 Rocketgenius
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2, as
@@ -26,7 +26,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-define( 'GF_PARTIAL_ENTRIES_VERSION', '1.0-beta-1' );
+define( 'GF_PARTIAL_ENTRIES_VERSION', '1.0.6' );
 
 add_action( 'gform_loaded', array( 'GF_Partial_Entries_Bootstrap', 'load' ), 5 );
 

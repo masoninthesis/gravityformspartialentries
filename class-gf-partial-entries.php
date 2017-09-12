@@ -9,6 +9,14 @@ if ( ! class_exists( 'GFForms' ) ) {
 // Use the following function to load the appropriate files.
 GFForms::include_feed_addon_framework();
 
+/**
+ * GF_Partial_Entries
+ *
+ *
+ * @copyright   Copyright (c) 2015-2016, Rocketgenius
+ * @license     http://opensource.org/licenses/gpl-2.0.php GNU Public License
+ * @since       1.0
+ */
 class GF_Partial_Entries extends GFFeedAddOn {
 
 	protected $_multiple_feeds = false;
@@ -66,7 +74,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		add_filter( 'heartbeat_received', array( $this, 'filter_heartbeat_received' ), 10, 2 );
 		add_filter( 'heartbeat_nopriv_received', array( $this, 'filter_heartbeat_received' ), 10, 2 );
 		add_action( 'gform_entry_id_pre_save_lead', array( $this, 'filter_gform_entry_id_pre_save_lead' ), 9, 2 );
-
+		add_action( 'gform_is_duplicate', array( $this, 'filter_gform_is_duplicate' ) , 10, 4 );
 		add_action( 'gform_post_process', array( $this, 'action_gform_post_process' ), 10, 3 );
 	}
 
@@ -75,23 +83,24 @@ class GF_Partial_Entries extends GFFeedAddOn {
 
 		add_filter( 'gform_filter_links_entry_list', array( $this, 'filter_gform_filter_links_entry_list' ), 10, 3 );
 
-		if ( $this->is_entry_list() && ! isset( $_GET['filter'] ) ) {
-			$default_filter = $this->get_default_filter();
-			if ( $default_filter !== 'all' ) {
-				$url = add_query_arg( array( 'filter' => $default_filter ) );
-				$url = esc_url_raw( $url );
-				wp_safe_redirect( $url );
-			}
-		}
-
 		add_filter( 'gform_entries_field_value', array( $this, 'filter_gform_entries_field_value' ), 10, 4 );
 		add_filter( 'gform_entry_info', array( $this, 'action_gform_entry_info' ), 10, 2 );
 
-		add_filter( 'screen_settings', array( $this, 'show_screen_options' ), 10, 2 );
-		add_filter( 'set-screen-option', array( $this, 'set_screen_options' ), 11, 3 );
-		add_action( 'load-forms_page_gf_entries', array( $this, 'load_screen_options' ) );
-		add_filter( 'gform_entry_page_size', array( $this, 'filter_gform_entry_page_size' ) );
-
+		if ( ! method_exists( 'GFForms', 'set_screen_options' ) ) {
+			// Required for Gravity Forms < 2.0
+			if ( $this->is_entry_list() && ! isset( $_GET['filter'] ) ) {
+				$default_filter = $this->get_default_filter();
+				if ( $default_filter !== 'all' ) {
+					$url = add_query_arg( array( 'filter' => $default_filter ) );
+					$url = esc_url_raw( $url );
+					wp_safe_redirect( $url );
+				}
+			}
+			add_filter( 'screen_settings', array( $this, 'show_screen_options' ), 10, 2 );
+			add_filter( 'set-screen-option', array( $this, 'set_screen_options' ), 11, 3 );
+			add_action( 'load-forms_page_gf_entries', array( $this, 'load_screen_options' ) );
+			add_filter( 'gform_entry_page_size', array( $this, 'filter_gform_entry_page_size' ) );
+		}
 	}
 
 	public function init_ajax() {
@@ -99,6 +108,12 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		add_filter( 'gform_filter_links_entry_list', array( $this, 'filter_gform_filter_links_entry_list' ), 10, 3 );
 	}
 
+	/**
+	 * Target for the gform_enqueue_scripts filter.
+	 *
+	 * @param $form
+	 * @param $is_ajax
+	 */
 	public function action_gform_enqueue_scripts( $form, $is_ajax ) {
 
 		$form_id = absint( $form['id'] );
@@ -116,11 +131,11 @@ class GF_Partial_Entries extends GFFeedAddOn {
 			$warning_message = $default_warning_message;
 		}
 
-		$warning_message = gf_apply_filters( 'gform_partialentries_warning_message', $form_id, $warning_message );
+		$warning_message = apply_filters( 'gform_partialentries_warning_message', $warning_message );
+		$warning_message = apply_filters( 'gform_partialentries_warning_message_' . $form_id, $warning_message );
 
-		wp_enqueue_script( 'heartbeat' );
 		$min = defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG || isset( $_GET['gform_debug'] ) ? '' : '.min';
-		wp_enqueue_script( 'gf_partial_entries', $this->get_base_url() . "/js/partial-entries{$min}.js", array( 'jquery' ), $this->_version, true );
+		wp_enqueue_script( 'gf_partial_entries', $this->get_base_url() . "/js/partial-entries{$min}.js", array( 'heartbeat', 'jquery' ), $this->_version, true );
 		wp_localize_script( 'gf_partial_entries', 'gf_partial_entries_strings_' . $form_id, array(
 			'warningMessage' => $warning_message,
 		) );
@@ -128,6 +143,11 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		add_filter( 'gform_form_tag', array( $this, 'filter_gform_form_tag' ), 10, 2 );
 	}
 
+	/**
+	 * Set up the scripts.
+	 *
+	 * @return array
+	 */
 	public function scripts() {
 		$min     = defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG || isset( $_GET['gform_debug'] ) ? '' : '.min';
 		$scripts = array(
@@ -168,11 +188,16 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return array_merge( parent::scripts(), $scripts );
 	}
 
+	/**
+	 * Return the feed settings config.
+	 *
+	 * @return array
+	 */
 	function feed_settings_fields() {
 		return array(
 			array(
 				'title'  => __( 'Partial Entries', 'gravityformspartialentries' ),
-					'fields' => array(
+				'fields' => array(
 					array(
 						'name'    => 'enable',
 						'label'   => esc_html__( 'Partial Entries', 'gravityformspartialentries' ),
@@ -211,18 +236,25 @@ class GF_Partial_Entries extends GFFeedAddOn {
 						'name'           => 'enable',
 						'label'          => esc_html__( 'Conditional Logic', 'gravityformspartialentries' ),
 						'type'           => 'feed_condition',
-						'checkbox_label' => esc_html__( 'Enable Conditional Logic', 'gravityformspartialentries' ),
+						'checkbox_label' => esc_html__( 'Enable', 'gravityformspartialentries' ),
 						'instructions'   => esc_html__( 'Add/update partial entry if', 'gravityformspartialentries' ),
 						'dependency'     => array(
 							'field'  => 'enable',
 							'values' => array( 1 ),
 						),
 					),
-				)
+				),
 			),
 		);
 	}
 
+	/**
+	 * Output the threshold setting.
+	 *
+	 * @param $field
+	 *
+	 * @return string
+	 */
 	public function settings_threshold( $field ) {
 		$percent_choices = array();
 		for ( $i = 10; $i <= 100; $i += 10 ) {
@@ -256,6 +288,14 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $html;
 	}
 
+	/**
+	 * Configure entry meta.
+	 *
+	 * @param array $entry_meta
+	 * @param int $form_id
+	 *
+	 * @return array
+	 */
 	public function get_entry_meta( $entry_meta, $form_id ) {
 
 		$form          = GFAPI::get_form( $form_id );
@@ -265,20 +305,20 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		}
 
 		$entry_meta['partial_entry_id'] = array(
-			'label'             => __( 'Partial Entry ID', 'gravityflow' ),
+			'label'             => __( 'Partial Entry ID', 'gravityformspartialentries' ),
 			'is_numeric'        => false,
 			'is_default_column' => false,
 		);
 
 		$entry_meta['partial_entry_percent'] = array(
-			'label'                      => __( 'Progress', 'gravityflow' ),
+			'label'                      => __( 'Progress', 'gravityformspartialentries' ),
 			'is_numeric'                 => true,
 			'is_default_column'          => true,
 			'update_entry_meta_callback' => array( $this, 'callback_update_partial_entry_percent_entry_meta' ),
 			'filter'                     => array(
-				'operators' => array( 'is', '>' ),
+				'operators' => array( 'is', 'isnot', '>' ),
 				'choices'   => array(
-					array( 'text' => 'Complete', 'value' => '', 'operators' => array( 'is' ) ),
+					array( 'text' => 'Complete', 'value' => '', 'operators' => array( 'is', 'isnot' ) ),
 					array( 'text' => '30%', 'value' => '30', 'operators' => array( '>' ) ),
 					array( 'text' => '60%', 'value' => '60', 'operators' => array( '>' ) ),
 				),
@@ -286,7 +326,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		);
 
 		$entry_meta['required_fields_percent_complete'] = array(
-			'label'                      => esc_html__( 'Progress: required fields', 'gravityflow' ),
+			'label'                      => esc_html__( 'Progress: required fields', 'gravityformspartialentries' ),
 			'is_numeric'                 => true,
 			'is_default_column'          => false,
 			'update_entry_meta_callback' => array( $this, 'callback_update_partial_entry_percent_entry_meta' ),
@@ -295,17 +335,17 @@ class GF_Partial_Entries extends GFFeedAddOn {
 
 		if ( rgars( $form, 'save/enabled' ) ) {
 			$entry_meta['resume_token'] = array(
-				'label'             => __( 'Save and Continue Token', 'gravityflow' ),
+				'label'             => __( 'Save and Continue Token', 'gravityformspartialentries' ),
 				'is_numeric'        => false,
 				'is_default_column' => false,
 			);
 			$entry_meta['resume_url']   = array(
-				'label'             => __( 'Save and Continue URL', 'gravityflow' ),
+				'label'             => __( 'Save and Continue URL', 'gravityformspartialentries' ),
 				'is_numeric'        => false,
 				'is_default_column' => false,
 			);
 			$entry_meta['date_saved']   = array(
-				'label'             => __( 'Saved', 'gravityflow' ),
+				'label'             => __( 'Saved', 'gravityformspartialentries' ),
 				'is_numeric'        => false,
 				'is_default_column' => true,
 			);
@@ -314,20 +354,41 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $entry_meta;
 	}
 
+	/**
+	 * Target for the callback_update_partial_entry_percent_entry_meta callback.
+	 *
+	 * @param $key
+	 * @param $entry
+	 * @param $form
+	 *
+	 * @return string
+	 */
 	public function callback_update_partial_entry_percent_entry_meta( $key, $entry, $form ) {
 		return '';
 	}
 
 
+	/**
+	 * Saves the entry if the conditions are met.
+	 *
+	 * @param $form_id
+	 *
+	 * @return bool|string
+	 */
 	function maybe_save_partial_entry( $form_id ) {
 
 		if ( ! isset( $_POST['partial_entry_id'] ) ) {
 			return false;
 		}
+		
+		$this->log_debug( __METHOD__ . '() Running.' );
 
 		$partial_entry_id = sanitize_key( rgpost( 'partial_entry_id' ) );
 
 		$form = GFAPI::get_form( $form_id );
+
+		$form = apply_filters( 'gform_pre_render', $form, false, array() );
+		$form = apply_filters( 'gform_pre_render_' . $form['id'], $form, false, array() );
 
 		// create lead
 		// Save uuid with entry
@@ -335,35 +396,86 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		$partial_entry = $this->create_partial_entry( $form );
 
 		if ( empty( $partial_entry ) ) {
-			return;
+			return false;
 		}
 
 		if ( $partial_entry['partial_entry_percent'] == 0 ) {
+			$this->log_debug( __METHOD__ . '() Aborting; 0% completed.' );
+
 			return false;
 		}
+
+		$notification_event = 'partial_entry_saved';
 
 		if ( $partial_entry_id == 'pending' ) {
 			$partial_entry_id                  = GFFormsModel::get_uuid();
 			$partial_entry['partial_entry_id'] = $partial_entry_id;
-			GFAPI::add_entry( $partial_entry );
+			$result                            = GFAPI::add_entry( $partial_entry );
+
+			if ( is_wp_error( $result ) ) {
+				$message = 'Error: ' . $result->get_error_message();
+			} else {
+				$partial_entry['id'] = $result;
+				$message             = "Success. partial_entry_id = {$partial_entry_id}. Entry ID = {$result}.";
+			}
+			$this->log_debug( __METHOD__ . '(): Saving new partial entry. ' . $message );
 		} else {
 
-			$search_criteria                   = array(
+			$search_criteria = array(
 				'status'        => 'active',
 				'field_filters' => array(
 					array( 'key' => 'partial_entry_id', 'value' => $partial_entry_id ),
 				),
 			);
-			$entries                           = GFAPI::get_entries( $form_id, $search_criteria );
+
+			$entries = GFAPI::get_entries( $form_id, $search_criteria );
+
 			$partial_entry['partial_entry_id'] = $partial_entry_id;
+
 			if ( empty( $entries ) ) {
-				$partial_entry_id = GFFormsModel::get_uuid();
-				GFAPI::add_entry( $partial_entry );
+				$this->log_debug( __METHOD__ . '(): Partial entry not found.' );
+
+				//$partial_entry_id = GFFormsModel::get_uuid();
+				$result = GFAPI::add_entry( $partial_entry );
+
+				if ( is_wp_error( $result ) ) {
+					$message = 'Error: ' . $result->get_error_message();
+				} else {
+					$partial_entry['id'] = $result;
+					$message             = "Success. partial_entry_id = {$partial_entry_id}. Entry ID = {$result}.";
+				}
+				$this->log_debug( __METHOD__ . '(): Saving new partial entry. ' . $message );
 			} else {
+				$notification_event  = 'partial_entry_updated';
 				$saved_entry         = $entries[0];
 				$partial_entry['id'] = $saved_entry['id'];
-				GFAPI::update_entry( $partial_entry );
+				$result              = GFAPI::update_entry( $partial_entry );
+
+				if ( is_wp_error( $result ) ) {
+					$message = 'Error: ' . $result->get_error_message();
+				} else {
+					$message = "Success. Entry ID = {$partial_entry['id']}.";
+				}
+				$this->log_debug( __METHOD__ . '(): Updating existing partial entry. ' . $message );
 			}
+		}
+
+		if ( ! is_wp_error( $result ) && $result ) {
+			GFAPI::send_notifications( $form, $partial_entry, $notification_event );
+
+			$event = str_replace( 'partial_', '', $notification_event );
+
+			/**
+			 * Perform a custom action when the partial entry has been saved or updated.
+			 *
+			 * The dynamic part of the hook name contains the event which occurred; entry_saved or entry_updated.
+			 * 
+			 * @param array $partial_entry The partial entry object.
+			 * @param array $form The form object used to process this partial entry.
+			 * 
+			 * @see https://www.gravityhelp.com/documentation/article/gform_partialentries_post_event/
+			 */
+			do_action( "gform_partialentries_post_{$event}", $partial_entry, $form );
 		}
 
 		return $partial_entry_id;
@@ -372,10 +484,9 @@ class GF_Partial_Entries extends GFFeedAddOn {
 	/**
 	 * Creates a partial entry - fields that fail validation will return empty values.
 	 *
-	 *
 	 * @param $form
 	 *
-	 * @return array The partial entry
+	 * @return array|false The partial entry
 	 */
 	public function create_partial_entry( $form ) {
 
@@ -386,6 +497,8 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		$feed_settings = $this->get_feed_settings( $form_id );
 		$enabled       = rgar( $feed_settings, 'enable' );
 		if ( ! $enabled ) {
+			$this->log_debug( __METHOD__ . '() Aborting; Not enabled.' );
+
 			return false;
 		}
 
@@ -394,45 +507,57 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		$total_fields              = 0;
 		$required_fields           = 0;
 
-		$page_number = GFFormDisplay::get_source_page( $form['id'] );
-
+		$unset_keys   = array();
+		$ignore_types = array(
+			'fileupload',
+			'creditcard',
+		);
+		
 		foreach ( $form['fields'] as $key => $field ) {
 			/* @var GF_Field $field */
-			if ( $field->displayOnly || in_array( $field->get_input_type(), array(
-					'fileupload',
-					'hidden',
-					'creditcard',
-				) )
-			) {
-				unset( $form['fields'][ $key ] );
+			if ( $field->displayOnly || in_array( $field->get_input_type(), $ignore_types ) ) {
+				$unset_keys[] = $key;
 			} else {
 				$total_fields ++;
 				if ( $field->isRequired ) {
 					$required_fields ++;
 				}
+				if ( $field->noDuplicates ) {
+					$field->noDuplicates = false;
+				}
 			}
+		}
+
+		if ( $total_fields == 0 ) {
+			$this->log_debug( __METHOD__ . '() Aborting; No applicable fields to save.' );
+
+			return false;
+		}
+
+		foreach ( $unset_keys as $key ) {
+			unset( $form['fields'][ $key ] );
 		}
 
 		$form['fields'] = array_values( $form['fields'] );
 
-		if ( $total_fields == 0 ) {
-			return false;
+		if ( rgpost( 'action' ) == 'heartbeat' ) {
+			$this->log_debug( __METHOD__ . '(): is heartbeat; running GFFormDisplay::validate().' );
+			$page_number = GFFormDisplay::get_source_page( $form['id'] );
+			GFFormDisplay::validate( $form, array(), $page_number, $page_number );
 		}
-
-		$is_valid = GFFormDisplay::validate( $form, array(), $page_number, $page_number );
 
 		$entry = GFFormsModel::create_lead( $form );
 
 		foreach ( $form['fields'] as $field ) {
 
-			if ( $field->isRequired && GFFormDisplay::is_empty( $field, $form['id'] ) ) {
+			if ( $field->isRequired && $field->is_value_submission_empty( $form_id ) ) {
 				continue;
 			}
-			$pre_value = $field->get_value_submission( array() );
-			$value = GFFormsModel::get_field_value( $field );
-			$field_value = $field->get_value_default_if_empty( $pre_value );
 			/* @var GF_Field $field */
-			$inputs = in_array( $field->get_input_type(), array( 'date', 'time' ) ) ? $field->inputs : $field->get_entry_inputs();
+			$inputs = in_array( $field->get_input_type(), array(
+				'date',
+				'time',
+			) ) ? $field->inputs : $field->get_entry_inputs();
 			if ( $field->failed_validation ) {
 				if ( is_array( $inputs ) ) {
 					foreach ( $inputs as $input ) {
@@ -441,8 +566,8 @@ class GF_Partial_Entries extends GFFeedAddOn {
 						}
 					}
 				} else {
-					if ( isset( $entry[ $field->id ] ) ) {
-						$entry[ $field->id ] = '';
+					if ( isset( $entry[ (string) $field->id ] ) ) {
+						$entry[ (string) $field->id ] = '';
 					}
 				}
 			} else {
@@ -458,7 +583,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 						}
 					}
 				} else {
-					if ( isset( $entry[ $field->id ] ) && ! empty( $entry[ $field->id ] ) ) {
+					if ( isset( $entry[ (string) $field->id ] ) && ! empty( $entry[ (string) $field->id ] ) ) {
 						$fields_completed ++;
 						if ( $field->isRequired ) {
 							$required_fields_completed ++;
@@ -475,6 +600,8 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		$feed    = $this->get_feed( $feed_id );
 
 		if ( ! $this->is_feed_condition_met( $feed, $form, $entry ) ) {
+			$this->log_debug( __METHOD__ . '() Aborting; Condition not met.' );
+
 			return false;
 		}
 
@@ -489,10 +616,30 @@ class GF_Partial_Entries extends GFFeedAddOn {
 			$entry['date_saved']   = $saved_entry_details['date_created'];
 		}
 
+		$entry_meta = GFFormsModel::get_entry_meta( $form_id );
+		if ( is_array( $entry_meta ) ) {
+			$keys_to_skip = array( 'required_fields_percent_complete', 'partial_entry_percent' );
+			foreach ( $entry_meta as $key => $item ) {
+				if ( ! in_array( $key, $keys_to_skip ) && isset( $item['update_entry_meta_callback'] ) ) {
+					$entry[ $key ] = call_user_func_array( $item['update_entry_meta_callback'], array( $key, $entry, $form ) );
+				}
+			}
+		}
+
 		return $entry;
 
 	}
 
+	/**
+	 * Target for the gform_entries_field_value filter. Returns the value for the entry list.
+	 *
+	 * @param $value
+	 * @param $form_id
+	 * @param $field_id
+	 * @param $entry
+	 *
+	 * @return string
+	 */
 	public function filter_gform_entries_field_value( $value, $form_id, $field_id, $entry ) {
 
 		switch ( $field_id ) {
@@ -524,6 +671,14 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $html;
 	}
 
+	/**
+	 * Target for the gform_entry_id_pre_save_lead filter. If a partial entry exists use its ID and delete partial entry meta.
+	 *
+	 * @param $entry_id
+	 * @param $form
+	 *
+	 * @return int
+	 */
 	public function filter_gform_entry_id_pre_save_lead( $entry_id, $form ) {
 		$partial_entry_id = sanitize_key( rgpost( 'partial_entry_id' ) );
 
@@ -534,10 +689,13 @@ class GF_Partial_Entries extends GFFeedAddOn {
 					array( 'key' => 'partial_entry_id', 'value' => $partial_entry_id ),
 				),
 			);
-			$entries         = GFAPI::get_entries( $form['id'], $search_criteria );
+
+			$entries = GFAPI::get_entries( $form['id'], $search_criteria );
 			if ( count( $entries ) > 0 ) {
 				$entry    = $entries[0];
 				$entry_id = absint( $entry['id'] );
+				$result = GFAPI::update_entry( array( 'id' => $entry_id ) );
+				$this->log_debug( __METHOD__ . '() update result: ' . print_r( $result, true ) );
 				gform_delete_meta( $entry_id, 'partial_entry_id' );
 				gform_delete_meta( $entry_id, 'date_saved' );
 				gform_delete_meta( $entry_id, 'resume_url' );
@@ -548,8 +706,15 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $entry_id;
 	}
 
+	/**
+	 * Target for the heartbeat_received filter. Handles the transport of the partial entry data.
+	 *
+	 * @param $response
+	 * @param $data
+	 *
+	 * @return mixed
+	 */
 	public function filter_heartbeat_received( $response, $data ) {
-		// Make sure we only run our query if the edd_heartbeat key is present
 		if ( isset( $data['gf-partial_entries-heartbeat'] ) ) {
 			$orginal_post                       = $_POST;
 			$forms_values                       = json_decode( $data['gf-partial_entries-heartbeat'], true );
@@ -561,7 +726,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 					if ( strpos( $key, '.' ) !== false ) {
 						$key = str_replace( '.', '_', $key );
 					}
-					if ( strpos( $key, '[]') !== false ) {
+					if ( strpos( $key, '[]' ) !== false ) {
 						$key = str_replace( '[]', '', $key );
 						if ( ! isset( $post_values[ $key ] ) ) {
 							$post_values[ $key ] = array();
@@ -571,7 +736,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 						$post_values[ $key ] = $form_value['value'];
 					}
 				}
-				$_POST = array_merge_recursive( $orginal_post, $post_values );
+				$_POST            = array_merge_recursive( $orginal_post, $post_values );
 				$partial_entry_id = $this->maybe_save_partial_entry( $form_id );
 				if ( ! empty( $partial_entry_id ) ) {
 					$response['gf-partial-entries-ids'][ $form_id ] = $partial_entry_id;
@@ -582,7 +747,16 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $response;
 	}
 
+	/**
+	 * Target for the gform_entry_info action. Displays the progress information on the entry detail page.
+	 *
+	 * @param $form_id
+	 * @param $entry
+	 */
 	public function action_gform_entry_info( $form_id, $entry ) {
+		if ( ! $this->is_enabled( $form_id ) ) {
+			return;
+		}
 
 		$partial_entry_id = rgar( $entry, 'partial_entry_id' );
 		if ( empty( $partial_entry_id ) ) {
@@ -590,9 +764,25 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		} else {
 			$progress = sprintf( '<div title="%d%%" id="gform_partial_entry_percent_%d" data-percentage="%d" class="gform_partial_entry_percent" style="width: 25px; height: 25px; display:inline-block;position:relative;top:7px;"></div>', $entry['partial_entry_percent'], $entry['id'], $entry['partial_entry_percent'] );
 		}
-		printf( esc_html__( 'Progress: %s', 'gravityflow' ), $progress );
+		printf( esc_html__( 'Progress: %s', 'gravityformspartialentries' ), $progress );
+
+		$date_saved = rgar( $entry, 'date_saved' );
+
+		if ( ! empty( $date_saved ) ) {
+			$date = GFCommon::format_date( $date_saved );
+			$link = empty( $entry['resume_url'] ) ? '' : sprintf( '<a target="_blank" href="%s" title="%s"><i class="fa fa-save"></i></a>', rgar( $entry, 'resume_url' ), esc_html__( 'Open saved form', 'gravityforms' ) );
+			echo '<div style="margin-top:10px;">' . sprintf( esc_html__( 'Last Saved: %s ', 'gravityformspartialentries' ), $date ) . $link . '</div>';
+		}
 	}
 
+	/**
+	 * Target for the gform_form_tag filter. Adds the partial entry ID as a hidden field.
+	 *
+	 * @param $form_tag
+	 * @param $form
+	 *
+	 * @return string
+	 */
 	public function filter_gform_form_tag( $form_tag, $form ) {
 		$feed_settings = $this->get_feed_settings( $form['id'] );
 		if ( rgar( $feed_settings, 'enable' ) ) {
@@ -617,8 +807,17 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $form_tag;
 	}
 
+	/**
+	 * Target for the gform_filter_links_entry_list filter. Adds the config for the filters on the entry list.
+	 *
+	 * @param $filter_links
+	 * @param $form
+	 * @param $include_counts
+	 *
+	 * @return mixed
+	 */
 	public function filter_gform_filter_links_entry_list( $filter_links, $form, $include_counts ) {
-		if ( ! $this->is_enabled( $form ) ) {
+		if ( ! $this->is_enabled( $form['id'] ) ) {
 			return $filter_links;
 		}
 
@@ -675,12 +874,27 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $filter_links;
 	}
 
-	public function is_enabled( $form ) {
-		$feed_settings = $this->get_feed_settings( $form['id'] );
+	/**
+	 * Is Partial Entries enabled for the given form?
+	 *
+	 * @param $form_id
+	 *
+	 * @return bool
+	 */
+	public function is_enabled( $form_id ) {
+		$feed_settings = $this->get_feed_settings( $form_id );
 
 		return (bool) rgar( $feed_settings, 'enable' );
 	}
 
+	/**
+	 * Displays the screen options on the entry list for Gravity Forms < 2.0
+	 *
+	 * @param $status
+	 * @param $args
+	 *
+	 * @return string
+	 */
 	public function show_screen_options( $status, $args ) {
 
 		$return = $status;
@@ -703,7 +917,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 				$id           = esc_attr( $filter['id'] );
 				$label        = esc_attr( $filter['label'] );
 				$checked      = checked( $filter['id'], $selected_filter, false );
-				$radios_arr[] = sprintf( '<input type="radio" name="gravityformspartialentries_default_filter" value="%s" id="gravityformspartialentries_default_filter_%s" %s /><label for="gravityformspartialentries_default_filter_%s">%s</label>', $id, $id, $checked, $id, $label );
+				$radios_arr[] = sprintf( '<input type="radio" name="gform_default_filter" value="%s" id="gform_default_filter_%s" %s /><label for="gform_default_filter_%s">%s</label>', $id, $id, $checked, $id, $label );
 			}
 
 			$radios_str = join( "\n", $radios_arr );
@@ -720,10 +934,10 @@ class GF_Partial_Entries extends GFFeedAddOn {
             </div>
             </div>
             <div class='screen-options'>
-            	<label for='gravityformspartialentries_per_page%s'>{$entries_label}</label>
-            	<input type='number' step='1' min='1' max='100' class='screen-per-page' name='gravityformspartialentries_per_page'
-					id='gravityformspartialentries_per_page' maxlength='3' value='{$per_page}' />
-            	<input type='hidden' name='wp_screen_options[option]' value='gravityformspartialentries_entries_screen_options' />
+            	<label for='gform_per_page%s'>{$entries_label}</label>
+            	<input type='number' step='1' min='1' max='100' class='screen-per-page' name='gform_per_page'
+					id='gform_per_page' maxlength='3' value='{$per_page}' />
+            	<input type='hidden' name='wp_screen_options[option]' value='gform_entries_screen_options' />
             	<input type='hidden' name='wp_screen_options[value]' value='yes' />
 			</div>
 
@@ -735,17 +949,34 @@ class GF_Partial_Entries extends GFFeedAddOn {
 
 	}
 
+	/**
+	 * Sets the screen options for the entry list on Gravity Forms < 2.0
+	 *
+	 * @param $status
+	 * @param $option
+	 * @param $value
+	 *
+	 * @return array
+	 */
 	function set_screen_options( $status, $option, $value ) {
 		$return = $value;
-		if ( 'gravityformspartialentries_entries_screen_options' == $option ) {
+		if ( 'gform_entries_screen_options' == $option ) {
 			$return                   = array();
-			$return['default_filter'] = $_POST['gravityformspartialentries_default_filter'];
-			$return['per_page']       = $_POST['gravityformspartialentries_per_page'];
+			$return['default_filter'] = $_POST['gform_default_filter'];
+			$return['per_page']       = $_POST['gform_per_page'];
 		}
 
 		return $return;
 	}
 
+	/**
+	 * Target for the gform_entry_page_size filter.
+	 * Required for the entry list on Gravity Forms < 2.0
+	 *
+	 * @param $per_page
+	 *
+	 * @return mixed
+	 */
 	public function filter_gform_entry_page_size( $per_page ) {
 
 		$option_values = $this->get_screen_options();
@@ -753,6 +984,11 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $option_values['per_page'];
 	}
 
+	/**
+	 * Returns the filter links for the entry list. Required for Gravity Forms < 2.0.
+	 *
+	 * @return array|mixed|string|void
+	 */
 	public function get_filter_links() {
 		$forms   = RGFormsModel::get_forms( null, 'title' );
 		$form_id = rgget( 'id' );
@@ -774,6 +1010,11 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $filters;
 	}
 
+	/**
+	 * Returns the default filter. Required for Gravity Forms < 2.0.
+	 *
+	 * @return string
+	 */
 	public function get_default_filter() {
 
 		$filters = $this->get_filter_links();
@@ -792,13 +1033,18 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $selected_filter;
 	}
 
+	/**
+	 * Returns the screen options for the entry list. Required for Gravity Forms < 2.0.
+	 *
+	 * @return array|mixed
+	 */
 	public function get_screen_options() {
 		$default_values = array(
 			'per_page'       => 20,
 			'default_filter' => 'all',
 		);
 
-		$option_values = get_user_option( 'gravityformspartialentries_entries_screen_options' );
+		$option_values = get_user_option( 'gform_entries_screen_options' );
 
 		if ( empty( $option_values ) ) {
 			$option_values = array();
@@ -809,6 +1055,13 @@ class GF_Partial_Entries extends GFFeedAddOn {
 
 	}
 
+	/**
+	 * Returns the feed settings.
+	 *
+	 * @param $form_id
+	 *
+	 * @return array
+	 */
 	public function get_feed_settings( $form_id ) {
 		$feed_id = $this->get_default_feed_id( $form_id );
 		if ( ! $feed_id ) {
@@ -822,6 +1075,14 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $feed_settings;
 	}
 
+	/**
+	 * A dedicated feed condition setting which includes some custom values as entry meta.
+	 *
+	 * @param $field
+	 * @param bool $echo
+	 *
+	 * @return string
+	 */
 	public function settings_feed_condition( $field, $echo = true ) {
 
 		$checkbox_label = isset( $field['checkbox_label'] ) ? $field['checkbox_label'] : esc_html__( 'Enable Condition', 'gravityforms' );
@@ -860,17 +1121,18 @@ class GF_Partial_Entries extends GFFeedAddOn {
 			$percent_choices[] = array( 'text' => $i . '%', 'value' => $i );
 		}
 
-		$entry_meta['partial_entry_percent']            = array(
+		$entry_meta['partial_entry_percent'] = array(
 			'label'  => __( 'Progress: all fields', 'gravityflow' ),
 			'filter' => array(
-				'operators' => array( '>' ),
+				'operators' => array( '>', 'is' ),
 				'choices'   => $percent_choices,
 			),
 		);
+
 		$entry_meta['required_fields_percent_complete'] = array(
 			'label'  => esc_html__( 'Progress: required fields', 'gravityflow' ),
 			'filter' => array(
-				'operators' => array( '>' ),
+				'operators' => array( '>', 'is' ),
 				'choices'   => $percent_choices,
 			),
 		);
@@ -889,6 +1151,13 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		return $html;
 	}
 
+	/**
+	 * Target for the gform_post_process action. Saves a partial entry if conditions are met.
+	 *
+	 * @param $form
+	 * @param $page_number
+	 * @param $source_page_number
+	 */
 	function action_gform_post_process( $form, $page_number, $source_page_number ) {
 		$submission_info = GFFormDisplay::$submission[ $form['id'] ];
 
@@ -909,10 +1178,20 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		}
 	}
 
+	/**
+	 * Returns the default warning message to display above the form.
+	 *
+	 * @return string
+	 */
 	function get_default_warning_message() {
 		return esc_html__( 'Please note that your information is saved on our server as you enter it.', 'gravityformspartialentries' );
 	}
 
+	/**
+	 * Custom setting to display warning messages if certain field types exist on the form.
+	 *
+	 * @param $field
+	 */
 	function settings_fields_message( $field ) {
 		$form_id = rgget( 'id' );
 		$form    = GFAPI::get_form( $form_id );
@@ -935,7 +1214,7 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		if ( $display_fileupload_warning ) {
 			?>
 			<div class="delete-alert alert_red"><i class="fa fa-exclamation-triangle gf_invalid"></i>
-				<?php esc_html_e( 'File Uploads will not be included in the partial entries.', 'gravityflow' ); ?>
+				<?php esc_html_e( 'File Uploads will not be included in the partial entries.', 'gravityformspartialentries' ); ?>
 			</div>
 			<?php
 		}
@@ -943,9 +1222,85 @@ class GF_Partial_Entries extends GFFeedAddOn {
 		if ( $display_creditcard_warning ) {
 			?>
 			<div class="delete-alert alert_red"><i class="fa fa-exclamation-triangle gf_invalid"></i>
-				<?php esc_html_e( 'The Credit Card field values will not be included in the partial entries.', 'gravityflow' ); ?>
+				<?php esc_html_e( 'The Credit Card field values will not be included in the partial entries.', 'gravityformspartialentries' ); ?>
 			</div>
 			<?php
 		}
+	}
+
+	/**
+	 * Add supported notification events.
+	 *
+	 * @param array $form The form currently being processed.
+	 *
+	 * @return array
+	 */
+	public function supported_notification_events( $form ) {
+
+		if ( ! $this->is_enabled( $form['id'] ) ) {
+			return false;
+		}
+
+		return array(
+			'partial_entry_saved'   => esc_html__( 'Partial Entries: Saved', 'gravityformspartialentries' ),
+			'partial_entry_updated' => esc_html__( 'Partial Entries: Updated', 'gravityformspartialentries' ),
+		);
+	}
+
+	public function filter_gform_is_duplicate( $is_duplicate, $form_id, $field, $value ) {
+
+		if ( empty( $_POST['partial_entry_id'] ) ) {
+			return $is_duplicate;
+		}
+
+		if ( ! $this->is_enabled( $form_id ) ) {
+			return $is_duplicate;
+		}
+
+
+
+		// Lookup entry id
+
+		switch ( GFFormsModel::get_input_type( $field ) ) {
+			case 'time':
+				$value = sprintf( "%02d:%02d %s", $value[0], $value[1], $value[2] );
+				break;
+			case 'date':
+				$value = GFFormsModel::prepare_date( $field->dateFormat, $value );
+				break;
+			case 'number':
+				$value = GFCommon::clean_number( $value, $field->numberFormat );
+				break;
+			case 'phone':
+				$value = str_replace( array( ')', '(', '-', ' ' ), '', $value );
+				break;
+			case 'email':
+				$value = is_array( $value ) ? rgar( $value, 0 ) : $value;
+				break;
+		}
+
+		$search_criteria = array(
+			'status'        => 'active',
+			'field_filters' => array(
+				array(
+					'key' => $field->id,
+					'operator' => '=',
+					'value' => $value,
+				),
+				$search_criteria['field_filters'][] = array(
+					'key' => 'partial_entry_percent',
+					'operator' => '=',
+					'value' => '',
+				),
+			),
+		);
+
+		$entries = GFAPI::get_entries( $form_id, $search_criteria );
+
+		if ( empty( $entries ) ) {
+			return false;
+		}
+
+		return $is_duplicate;
 	}
 }
